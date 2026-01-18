@@ -10,7 +10,8 @@ This skill teaches Claude systematic research workflows with:
 * **Mandatory protocols** — Working directory, checkpointing, reference management
 * **Iteration control** — Circuit breaker prevents endless research loops
 * **Project integration** — Maps to mdb-projects hierarchy (Project → Job → Task)
-* **Vault persistence** — All outputs saved to Obsidian vault, not ephemeral artifacts
+* **Backend abstraction** — Works with mdb vault or local storage with graceful degradation
+* **Offline workflow** — Export/import cycle for disconnected work
 
 ### Research Modes
 
@@ -24,22 +25,53 @@ This skill teaches Claude systematic research workflows with:
 | `synthesis` | Integrating knowledge, frameworks | Integrated models |
 | `rapid` | Time pressure, quick answers | Quick summaries |
 
+## Backends
+
+The skill abstracts document operations through a backoffice interface, with two backend implementations:
+
+| Backend | When Used | Capabilities |
+|---------|-----------|--------------|
+| **MDB** (primary) | mdb MCP server available | Full vault integration, semantic search, wikilinks, real-time persistence |
+| **Local** (fallback) | No mdb available | Session storage, pattern search only, manual export required |
+
+The skill detects the available backend automatically at session start and displays:
+```
+[Research Skill: MDB backend active]
+```
+or
+```
+[Research Skill: Local backend active]
+Note: Documents are session-local. Download outputs to persist.
+```
+
+### Capability Comparison
+
+| Capability | MDB | Local |
+|------------|-----|-------|
+| Semantic search | ✓ | ✗ (pattern only) |
+| Project hierarchy | ✓ | ○ (structure only) |
+| Wikilink resolution | ✓ | ✗ (text only) |
+| Real-time persistence | ✓ | ✗ (export required) |
+| Frontmatter validation | ✓ | ○ (format only) |
+
 ## Prerequisites
 
-### MDB MCP Server
+### With MDB (Recommended)
 
-This skill requires the mdb MCP server for Obsidian vault integration:
+For full functionality, use the mdb MCP server for Obsidian vault integration:
 
 ```bash
 # Verify mdb is available
 claude mcp list | grep mdb
 ```
 
-The skill uses mdb tools for:
-- Creating and updating research outputs
-- Semantic search across vault
-- Frontmatter status management
-- Working directory validation
+### Without MDB
+
+The skill works without mdb using local storage. Limitations:
+- No semantic search (pattern matching only)
+- Documents are session-local (must export to persist)
+- Wikilinks stored as text (not resolved)
+- References developed through web search, uploads, and conversation
 
 ## Installation
 
@@ -78,22 +110,52 @@ The skill activates automatically when you mention research-related terms:
 "Use skill-research to create a research plan"
 ```
 
-### Manual Commands
+### Commands
 
-- **Reset session:** Say `research:reset` to force fresh approach
-- **Load mode:** "Load the investigative module"
+| Command | Action |
+|---------|--------|
+| `research:reset` | Force fresh approach, reset iteration counter |
+| "Export for offline work" | Package project for disconnected work |
+| "Continue offline research" + upload | Resume from export package |
+| "Package changes for sync" | Create import bundle for mdb merge |
+
+## Offline Workflow
+
+For users with mdb who need disconnected work:
+
+```
+1. EXPORT    → "Export for offline work"
+             → Download ZIP package
+
+2. WORK      → Upload package in new session
+             → Local backend activates
+             → Changes tracked in frontmatter
+
+3. PACKAGE   → "Package changes for sync"
+             → Download import bundle
+
+4. MERGE     → Upload to mdb environment
+             → Merge process (separate)
+```
+
+The skill tracks changes via frontmatter fields (`_local_mode`, `_sync_status`) for clean re-import.
 
 ## File Structure
 
 ```
 skill-research/
-├── SKILL.md                    # Core instructions (< 500 lines)
+├── SKILL.md                    # Core instructions (~280 lines)
 ├── README.md                   # This file
 ├── commands/
 │   └── research-init.md        # Slash command for setup
 ├── scripts/
 │   └── validate-setup.sh       # Environment verification
 └── references/
+    ├── backoffice/
+    │   ├── interface.md        # Abstract operations
+    │   ├── mdb-backend.md      # MDB implementation
+    │   ├── local-backend.md    # Local implementation
+    │   └── offline-sync.md     # Export/import workflow
     ├── modes/
     │   ├── exploratory.md      # Divergent research patterns
     │   ├── systematic.md       # PRISMA-style methodology
@@ -105,7 +167,7 @@ skill-research/
     ├── protocols/
     │   ├── checkpoint.md       # Checkpoint details
     │   ├── referencing.md      # Citation management
-    │   └── versioning.md       # MDB versioning rules
+    │   └── versioning.md       # Versioning rules
     ├── projects/
     │   ├── hierarchy.md        # Project → Job → Task mapping
     │   ├── frontmatter.md      # Status schemas
@@ -121,49 +183,60 @@ skill-research/
 
 | Component | Tokens | When Loaded |
 |-----------|--------|-------------|
-| SKILL.md | ~500 | Always on activation |
-| Mode references | ~300-500 | On-demand |
+| SKILL.md | ~600 | Always on activation |
+| Mode references | ~300-500 | On-demand per mode |
+| Backoffice references | ~300-400 | On backend detection |
 | Protocol references | ~200-300 | On-demand |
 | Templates | 0 | Used, not read |
 
-Typical session: ~1000-1500 tokens (core + 1-2 modules)
+Typical session: ~1200-1800 tokens (core + backend + 1-2 modes)
 
 ## Workflow Overview
 
-### 1. Session Initialization
+### 1. Backend Detection
+
+Before initialization, the skill detects available backend:
+- Check for mdb MCP server → MDB backend
+- No mdb → Local backend
+- Uploaded export package → Offline continuation mode
+
+### 2. Session Initialization
 
 Before any research, the skill establishes:
+- Backend status and capabilities
 - Project context (existing or new)
-- Working directory (from project definition)
+- Working directory (vault path or local workspace)
 - Research plan (existing or guided creation)
 - Active research modes
 - Session constraints (time, depth)
 
-### 2. Research Execution
+### 3. Research Execution
 
 - Modes loaded on-demand based on signals
 - References documented for key findings
 - Iteration counter tracks search cycles
 - Circuit breaker at 5 cycles
+- Backoffice operations inject behavioral reminders
 
-### 3. Checkpointing
+### 4. Checkpointing
 
 After each phase:
 - Checkpoint document created in working directory
-- Task status set to `review`
+- Task status set to `review` via frontmatter
 - Summary presented to user
 - Explicit approval required before continuing
+- (Local backend) Files presented for download
 
-### 4. Output Management
+### 5. Output Management
 
-- All outputs to vault working directory
+- All outputs to working directory
 - Filename versioning: `doc.md` → `doc.1.md`
-- Wikilinks back to research plan
+- Links back to research plan
 - Never overwrite source files
 
 ## Project Integration
 
-Research activities map to mdb-projects:
+Research activities map to mdb-projects hierarchy:
 
 ```
 Project: "Vortex Dynamics Literature Review"
@@ -176,11 +249,13 @@ Project: "Vortex Dynamics Literature Review"
     └── Task: "Integration Report"
 ```
 
+When using Local backend, this structure is maintained in frontmatter for later import to mdb.
+
 ## License
 
 Apache-2.0
 
 ## Related
 
-- [mdb-projects specification](../mdbrain/specs/mdb-projects-specification.md)
+- [mdb-projects specification](https://github.com/wgm-thesis-ltd/mdbrain) — Project hierarchy reference
 - [skill-web-debug](https://github.com/wgm-thesis-ltd/skill-web-debug) — Similar modular skill pattern
