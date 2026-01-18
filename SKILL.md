@@ -4,18 +4,20 @@ description: >
   Modular AI-assisted research skill with selectable modes and mandatory
   protocols. Supports exploratory, systematic, explanatory, comparative,
   investigative, synthesis, and rapid research styles. Integrates with
-  mdb-projects hierarchy for structured research workflows. Use when:
-  conducting literature reviews, investigating topics, comparing options,
-  synthesizing knowledge, fact-checking claims, building frameworks.
+  mdb-projects hierarchy when available; falls back to local storage with
+  manual sync workflow when mdb unavailable. Use when: conducting literature
+  reviews, investigating topics, comparing options, synthesizing knowledge,
+  fact-checking claims, building frameworks.
   Trigger keywords: "research", "investigate", "compare", "synthesize",
   "review", "explore", "analyze", "verify", "find evidence", "systematic",
   "comprehensive", "research plan".
 compatibility: >
-  Requires mdb MCP server for vault integration. Outputs persist to
-  Obsidian vault, not ephemeral artifacts.
+  Works with or without mdb MCP server. Primary: mdb for full vault
+  integration. Fallback: local storage with export/import sync workflow.
+  Document operations abstracted through backoffice interface.
 metadata:
   author: wgm-thesis
-  version: "1.1"
+  version: "1.2"
 ---
 
 # Research Skill
@@ -23,6 +25,32 @@ metadata:
 A modular research assistant with mode-based specialization and mandatory protocols.
 
 ## ⚠️ MANDATORY BEHAVIOURS (NON-NEGOTIABLE)
+
+### 0. Backend Detection
+
+Before session initialization, detect available backend:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  BACKEND DETECTION                                      │
+├─────────────────────────────────────────────────────────┤
+│  Check: mdb MCP server available?                       │
+│  ├─→ YES: Backend = MDB (full integration)              │
+│  │        Working dir = vault path                      │
+│  │                                                      │
+│  └─→ NO:  Backend = Local (session storage)             │
+│           Working dir = /home/claude/research-workspace │
+│           ⚠ Semantic search unavailable                 │
+│           ⚠ Manual export required for persistence      │
+│                                                         │
+│  Check: Offline export package uploaded?                │
+│  └─→ YES: Load manifest, continue from export           │
+└─────────────────────────────────────────────────────────┘
+```
+
+Display backend status: `[Research Skill: {MDB|Local} backend active]`
+
+**Backend details:** See `references/backoffice/*.md`
 
 ### 1. Session Initialization
 
@@ -32,9 +60,10 @@ Before ANY research, establish through dialogue:
 ┌─────────────────────────────────────────────────────────┐
 │  RESEARCH SESSION INITIALIZATION                        │
 ├─────────────────────────────────────────────────────────┤
+│  0. Backend: [MDB/Local] — [capabilities summary]       │
 │  1. Project Context: [detected/none]                    │
 │     → Confirm or create research project                │
-│  2. Working Directory: [from project vault_root]        │
+│  2. Working Directory: [from backend]                   │
 │     → Verify write access                               │
 │  3. Research Plan: [existing/none]                      │
 │     → Use existing or initiate guided creation          │
@@ -44,10 +73,15 @@ Before ANY research, establish through dialogue:
 └─────────────────────────────────────────────────────────┘
 ```
 
-**Rules:**
-- ALL outputs → working directory (from project definition)
-- NEVER use `/home/claude` or `/mnt/user-data/outputs`
-- Vault path: `/projects/[domain]/[topic]/`
+**Working Directory Rules:**
+
+| Backend | Working Directory | Persistence |
+|---------|-------------------|-------------|
+| MDB | `projects/[domain]/[topic]/` | Real-time to vault |
+| Local | `/home/claude/research-workspace/[project]/` | Export required |
+
+- ALL outputs → working directory
+- Local backend: present files for download at checkpoints
 
 ### 2. Reference Documentation
 
@@ -56,6 +90,15 @@ Before ANY research, establish through dialogue:
 - Format: `[Display Text](URL)` for iframe preview
 - Not every claim needs citation—use judgment
 - Apply source reliability: A (authoritative) → D (unreliable)
+
+**Reference Development by Backend:**
+
+| Backend | Primary Sources |
+|---------|-----------------|
+| MDB | Vault documents, web search, uploads |
+| Local | Web search, user prompts, uploads, conversation context |
+
+Local mode: Capture references in standard format for later vault import.
 
 ### 3. Checkpoint Protocol
 
@@ -150,23 +193,82 @@ Save to vault with `type: research-job` frontmatter before proceeding.
 
 ## ⚠️ PROTOCOL REMINDER (Every 3 Interactions)
 
+- [ ] Backend status confirmed?
 - [ ] Working directory verified?
 - [ ] Key claims have sources?
 - [ ] Still on scope per research plan?
 - [ ] Checkpoint pending?
 - [ ] Frontmatter status current?
+- [ ] (Local) Export needed for persistence?
 
 ---
 
-## MDB Integration
+## Backoffice Integration
 
-| Function | Tool | Usage |
-|----------|------|-------|
-| Verify working dir | `mdb:get_note` | Check path exists |
-| Create outputs | `mdb:create_note` | Save findings |
-| Update research | `mdb:update_note` | Append/revise |
-| Find related | `mdb:find` | Semantic search |
-| Update status | `mdb:update_note_frontmatter` | Transitions |
+Document operations are abstracted through the backoffice interface.
+Backend implementation provides concrete behavior.
+
+### Abstract Operations
+
+| Operation | Purpose | Reminder |
+|-----------|---------|----------|
+| `create_document` | Create with frontmatter | Verify path, type, status |
+| `get_document` | Retrieve content + frontmatter | May be stale if offline |
+| `update_document` | Modify content | Consider versioning first |
+| `update_frontmatter` | Change status fields | Valid transitions only |
+| `find_documents` | Search by query/type/status | Local: pattern only |
+| `version_document` | Create versioned copy | doc.md → doc.1.md |
+
+### Backend Implementations
+
+**MDB Backend:**
+```
+create_document  → mdb:create_note
+get_document     → mdb:get_note
+update_document  → mdb:update_note
+find_documents   → mdb:find (semantic search)
+```
+
+**Local Backend:**
+```
+create_document  → create_file (manual YAML)
+get_document     → view (parse frontmatter)
+update_document  → str_replace / create_file
+find_documents   → bash grep/find (patterns only)
+```
+
+### Behavioral Reminders
+
+Backoffice operations inject protocol reminders:
+
+```
+[Backoffice: create_document]
+Reminder: Verify path within working directory, 
+          frontmatter includes type and status.
+Proceeding...
+```
+
+**Full interface:** See `references/backoffice/interface.md`
+
+---
+
+## Offline Sync Workflow
+
+For users with mdb who need disconnected work:
+
+```
+1. EXPORT    → Package project for local work
+2. WORK      → Local backend, changes tracked
+3. PACKAGE   → Create import bundle with changes
+4. MERGE     → Re-import to mdb (separate process)
+```
+
+**Commands:**
+- "Export for offline work" → Create download package
+- "Continue offline research" + upload → Resume from export
+- "Package changes for sync" → Create import bundle
+
+**Full workflow:** See `references/backoffice/offline-sync.md`
 
 ---
 
